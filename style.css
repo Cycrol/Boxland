@@ -1,0 +1,13 @@
+html,body{height:100%;margin:0}
+body{
+  background: linear-gradient(180deg,#05060a,#0b0f15);
+  color:#fff;font-family:Inter,system-ui,Arial,Helvetica,sans-serif;
+  overflow:hidden;
+}
+#app{position:fixed;inset:0}
+
+/* Minimal UI hints (hidden) */
+.hint{position:fixed;left:16px;bottom:16px;background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:8px;font-size:13px;color:rgba(255,255,255,0.8)}
+
+/* Make canvas take full screen */
+canvas{display:block;width:100%;height:100%}
