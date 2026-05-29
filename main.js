@@ -1,168 +1,123 @@
 import * as THREE from 'https://unpkg.com/three@0.154.0/build/three.module.js';
-import { OrbitControls } from 'https://unpkg.com/three@0.154.0/examples/jsm/controls/OrbitControls.js';
-import { Cloth } from './physics.js';
-import { setupInput } from './input.js';
+import { Renderer } from './renderer.js';
+import { GraphSurface } from './graph.js';
+import { Surfer } from './surfer.js';
+import { createUI } from './ui.js';
+import { presets } from './presets.js';
+import { AudioManager } from './audio.js';
 
-// Scene setup
 const container = document.getElementById('app');
+const renderer = new Renderer(container);
+const graph = new GraphSurface(renderer.scene, {
+  size: 220,
+  segments: 220,
+  colorMap: 'futuristic'
+});
+renderer.setMesh(graph.mesh);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-container.appendChild(renderer.domElement);
+const surfer = new Surfer(renderer.scene, graph);
+const controls = { left: false, right: false };
+window.addEventListener('keydown', (event) => {
+  if (event.code === 'KeyA' || event.key === 'a') controls.left = true;
+  if (event.code === 'KeyD' || event.key === 'd') controls.right = true;
+});
+window.addEventListener('keyup', (event) => {
+  if (event.code === 'KeyA' || event.key === 'a') controls.left = false;
+  if (event.code === 'KeyD' || event.key === 'd') controls.right = false;
+});
+surfer.setControls(controls);
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060a);
+const audio = new AudioManager();
+let cameraMode = 'firstPerson';
+let cameraDistance = 1.2;
+const cameraDistanceMin = 0.6;
+const cameraDistanceMax = 18;
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 2.5, 6);
+window.addEventListener('wheel', (event) => {
+  if (cameraMode !== 'firstPerson') return;
+  const delta = event.deltaY > 0 ? 1 : -1;
+  cameraDistance = THREE.MathUtils.clamp(cameraDistance + delta * 0.28, cameraDistanceMin, cameraDistanceMax);
+  event.preventDefault();
+}, { passive: false });
 
-// Controls
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-
-// Lights
-const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-dir.position.set(5, 10, 5);
-dir.castShadow = true;
-dir.shadow.mapSize.set(2048, 2048);
-dir.shadow.camera.left = -10;
-dir.shadow.camera.right = 10;
-dir.shadow.camera.top = 10;
-dir.shadow.camera.bottom = -10;
-scene.add(dir);
-
-const amb = new THREE.HemisphereLight(0x8899aa, 0x10121a, 0.6);
-scene.add(amb);
-
-// Create cloth
-const cloth = new Cloth(6, 6, 80, 80);
-
-// Build geometry and mesh
-const segmentsX = cloth.segmentsX;
-const segmentsY = cloth.segmentsY;
-const vertCount = (segmentsX + 1) * (segmentsY + 1);
-const positions = new Float32Array(vertCount * 3);
-const normals = new Float32Array(vertCount * 3);
-const uvs = new Float32Array(vertCount * 2);
-
-// Fill initial positions & UVs
-let ptr = 0;
-let uptr = 0;
-for (let j = 0; j <= segmentsY; j++) {
-  for (let i = 0; i <= segmentsX; i++) {
-    const p = cloth.particles[j * (segmentsX + 1) + i].position;
-    positions[ptr++] = p.x;
-    positions[ptr++] = p.y;
-    positions[ptr++] = p.z;
-    uvs[uptr++] = i / segmentsX;
-    uvs[uptr++] = j / segmentsY;
+const ui = createUI({
+  equation: 'sin(sqrt(x*x + z*z) - t)',
+  presets,
+  onEquationChange(expr) {
+    graph.setExpression(expr);
+  },
+  onPlayPause(paused) {
+    renderer.setPaused(paused);
+    if (!paused) {
+      audio.start();
+    }
+  },
+  onSpeedChange(speed) {
+    graph.setSpeed(speed);
+  },
+  onAmplitudeChange(amplitude) {
+    graph.setAmplitude(amplitude);
+  },
+  onWavelengthChange(wavelength) {
+    graph.setWaveScale(wavelength);
+  },
+  onTurbulenceChange(turbulence) {
+    graph.setTurbulence(turbulence);
+  },
+  onViewToggle() {
+    cameraMode = cameraMode === 'firstPerson' ? 'thirdPerson' : 'firstPerson';
+    renderer.controls.setEnabled(false);
+    return cameraMode === 'firstPerson' ? 'First Person' : 'Third Person';
   }
-}
-
-const geometry = new THREE.BufferGeometry();
-geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-
-// Build indices for a grid
-const indices = [];
-for (let j = 0; j < segmentsY; j++) {
-  for (let i = 0; i < segmentsX; i++) {
-    const a = i + (segmentsX + 1) * j;
-    const b = i + (segmentsX + 1) * (j + 1);
-    const c = (i + 1) + (segmentsX + 1) * (j + 1);
-    const d = (i + 1) + (segmentsX + 1) * j;
-    indices.push(a, b, d);
-    indices.push(b, c, d);
-  }
-}
-geometry.setIndex(indices);
-geometry.computeVertexNormals();
-
-// Material: subtle glowing fabric
-const material = new THREE.MeshStandardMaterial({
-  color: 0xd0e7ff,
-  emissive: 0x05253a,
-  emissiveIntensity: 0.3,
-  roughness: 0.6,
-  metalness: 0.05,
-  side: THREE.DoubleSide,
-  flatShading: false
 });
 
-const clothMesh = new THREE.Mesh(geometry, material);
-clothMesh.castShadow = true;
-clothMesh.receiveShadow = true;
-scene.add(clothMesh);
+graph.setExpression(ui.getEquation());
+graph.setAmplitude(1);
+graph.setSpeed(1);
+graph.setWaveScale(0.18);
+graph.setTurbulence(0.45);
 
-// Add a subtle ground (for shadow contact) but keep transparent
-const groundGeo = new THREE.PlaneGeometry(40, 40);
-const groundMat = new THREE.ShadowMaterial({ opacity: 0.15 });
-const ground = new THREE.Mesh(groundGeo, groundMat);
-ground.rotation.x = -Math.PI / 2;
-ground.position.y = -1.6;
-ground.receiveShadow = true;
-scene.add(ground);
+renderer.onTick((time, delta) => {
+  graph.update(time);
+  surfer.update(delta, time);
 
-// Input
-const input = setupInput(renderer, camera, scene, cloth, clothMesh);
-
-// Physics loop using fixed timestep for stability
-let lastTime = performance.now();
-let accumulator = 0;
-const fixedDt = 1 / 60;
-
-function updatePhysics(dt) {
-  // Small global damping is applied in integrate; no global gravity to keep cloth floating
-  // But we add a tiny restorative force to avoid numerical drift
-  const restoreStrength = 0.001;
-  for (let i = 0; i < cloth.particles.length; i++) {
-    const p = cloth.particles[i];
-    // gentle pull toward initial plane (y=0) so cloth settles softly
-    const dy = -p.position.y * restoreStrength;
-    p.acceleration.y += dy;
+  const localX = surfer.worldX - graph.offsetX;
+  const localZ = surfer.worldZ - graph.offsetZ;
+  const boundary = graph.size * 0.35;
+  if (Math.abs(localX) > boundary || Math.abs(localZ) > boundary) {
+    graph.setOffset(
+      graph.offsetX + localX * 0.5,
+      graph.offsetZ + localZ * 0.5
+    );
   }
 
-  cloth.integrate(dt, 0.99);
-  cloth.satisfyConstraints(5);
-}
+  const headPosition = surfer.mesh.position.clone().add(new THREE.Vector3(0, 1.6, 0));
+  const forward = new THREE.Vector3(Math.sin(surfer.heading), 0, Math.cos(surfer.heading));
+  const lookAtTarget = headPosition.clone().add(forward.clone().multiplyScalar(12));
 
-// Render loop
-function animate() {
-  requestAnimationFrame(animate);
-
-  const now = performance.now();
-  let frameDt = (now - lastTime) / 1000;
-  if (frameDt > 0.25) frameDt = 0.25;
-  lastTime = now;
-  accumulator += frameDt;
-
-  while (accumulator >= fixedDt) {
-    updatePhysics(fixedDt);
-    accumulator -= fixedDt;
+  if (cameraMode === 'firstPerson') {
+    const cameraOffset = forward.clone().multiplyScalar(-cameraDistance).add(new THREE.Vector3(0, 1.2 + cameraDistance * 0.18, 0));
+    const desiredCam = headPosition.clone().add(cameraOffset);
+    renderer.camera.position.lerp(desiredCam, 0.18);
+    renderer.camera.lookAt(lookAtTarget);
+    const desiredFov = 72 - Math.min(18, cameraDistance * 1.2);
+    renderer.camera.fov = THREE.MathUtils.lerp(renderer.camera.fov, desiredFov, 0.08);
+  } else {
+    const behind = forward.clone().multiplyScalar(-12 - cameraDistance * 0.8);
+    const desiredCam = headPosition.clone().add(behind).add(new THREE.Vector3(0, 5 + cameraDistance * 0.4, 0));
+    renderer.camera.position.lerp(desiredCam, 0.1);
+    renderer.camera.lookAt(headPosition);
+    const desiredFov = 38 + Math.min(16, surfer.speed * 0.7);
+    renderer.camera.fov = THREE.MathUtils.lerp(renderer.camera.fov, desiredFov, 0.06);
   }
 
-  // copy particle positions into geometry buffer
-  cloth.fillPositions(geometry.attributes.position.array);
-  geometry.attributes.position.needsUpdate = true;
-  geometry.computeVertexNormals();
+  renderer.camera.updateProjectionMatrix();
+});
 
-  controls.update();
-  renderer.render(scene, camera);
-}
+graph.update(0);
+renderer.controls.setEnabled(false);
+renderer.start();
 
-window.addEventListener('resize', onWindowResize);
-function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-animate();
-
-// Expose for debugging
-window.__boxland = { scene, camera, cloth, clothMesh };
+audio.start().catch(() => {
+  window.addEventListener('pointerdown', () => audio.resume(), { once: true });
+});

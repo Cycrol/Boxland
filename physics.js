@@ -29,16 +29,19 @@ export class Cloth {
     for (let j = 0; j <= sy; j++) {
       for (let i = 0; i <= sx; i++) {
         const x = (i / sx) * this.width - halfW;
-        const y = 0; // keep cloth initially horizontal in XZ plane at y=0
+        const y = 0; // keep terrain initially horizontal in XZ plane at y=0
         const z = (j / sy) * this.height - halfH;
         const pos = { x, y, z };
+        // Pin all border vertices (edges of the terrain remain fixed in place)
+        const pinned = i === 0 || i === sx || j === 0 || j === sy;
         this.particles.push({
           position: { ...pos },
           prevPosition: { ...pos },
+          originalPosition: { ...pos },
           acceleration: { x: 0, y: 0, z: 0 },
           mass: 1,
           invMass: 1,
-          pinned: false
+          pinned
         });
       }
     }
@@ -112,7 +115,8 @@ export class Cloth {
   }
 
   // Solve distance constraints by moving particles along the connecting line.
-  satisfyConstraints(iterations = 5) {
+  // Terrain stiffness is much higher than cloth (default ~15 iterations instead of 5).
+  satisfyConstraints(iterations = 15) {
     for (let iter = 0; iter < iterations; iter++) {
       for (const c of this.constraints) {
         const a = this.particles[c.a];
@@ -125,8 +129,8 @@ export class Cloth {
         if (dist === 0) dist = 1e-6;
         const diff = (dist - c.rest) / dist;
 
-        const invMassSum = a.invMass + b.invMass;
-        const corr = 0.5; // distribute correction half/half for equal masses
+        // For terrain, use stronger correction but avoid full snap to prevent oscillation.
+        const corr = 0.75;
 
         if (!a.pinned) {
           a.position.x += dx * diff * corr;
@@ -138,6 +142,35 @@ export class Cloth {
           b.position.y -= dy * diff * corr;
           b.position.z -= dz * diff * corr;
         }
+      }
+    }
+  }
+
+  // Apply terrain smoothing: neighboring vertices partially average their heights.
+  // This gives a geological, smooth appearance instead of sharp jagged spikes.
+  smoothTerrain(strength = 0.08) {
+    const sx = this.segmentsX;
+    const sy = this.segmentsY;
+    const newHeights = new Float32Array((sx + 1) * (sy + 1));
+
+    // Copy current heights
+    for (let i = 0; i < this.particles.length; i++) {
+      newHeights[i] = this.particles[i].position.y;
+    }
+
+    // Average each height with its neighbors (4-connectivity)
+    const idx = (i, j) => j * (sx + 1) + i;
+    for (let j = 0; j <= sy; j++) {
+      for (let i = 0; i <= sx; i++) {
+        if (this.particles[idx(i, j)].pinned) continue; // Don't smooth border
+        let sum = newHeights[idx(i, j)];
+        let count = 1;
+        if (i > 0) { sum += newHeights[idx(i - 1, j)]; count++; }
+        if (i < sx) { sum += newHeights[idx(i + 1, j)]; count++; }
+        if (j > 0) { sum += newHeights[idx(i, j - 1)]; count++; }
+        if (j < sy) { sum += newHeights[idx(i, j + 1)]; count++; }
+        const avg = sum / count;
+        this.particles[idx(i, j)].position.y += (avg - this.particles[idx(i, j)].position.y) * strength;
       }
     }
   }

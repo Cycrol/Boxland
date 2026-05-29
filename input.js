@@ -1,13 +1,18 @@
-// Input handler: raycasts into the cloth mesh and applies soft radial displacement
-import * as THREE from 'https://unpkg.com/three@0.154.0/build/three.module.js';
-
-export function setupInput(renderer, camera, scene, cloth, mesh) {
+// Input handler: raycasts into the terrain mesh and applies soft radial displacement.
+// Supports raise/lower brush modes and adjustable brush size.
+// Accepts the shared THREE instance from the main module to avoid duplicate copies.
+export function setupInput(THREE, renderer, camera, scene, cloth, mesh) {
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   let dragging = false;
   let lastY = 0;
   let activeIndex = -1;
-  const radius = Math.max(cloth.width, cloth.height) * 0.12;
+  let lastCenter = null;
+  
+  // Terrain sculpting parameters
+  let brushSize = Math.max(cloth.width, cloth.height) * 0.12;
+  let brushMode = 'raise';  // 'raise' or 'lower'
+  const baseRadius = brushSize;
 
   function getPointer(event) {
     const rect = renderer.domElement.getBoundingClientRect();
@@ -23,7 +28,9 @@ export function setupInput(renderer, camera, scene, cloth, mesh) {
       dragging = true;
       lastY = e.clientY;
       activeIndex = findNearestParticle(intersects[0].point);
-      applyRadialDisplacement(intersects[0].point, 0.02);
+      lastCenter = intersects[0].point.clone();
+      // stronger immediate feedback when starting a sculpt
+      applyRadialDisplacement(lastCenter, 0.08);
     }
   }
 
@@ -33,7 +40,9 @@ export function setupInput(renderer, camera, scene, cloth, mesh) {
     lastY = e.clientY;
 
     // Map screen delta to world vertical displacement
-    const amount = -deltaY * 6.0; // tuned strength
+    // Scale based on brush mode: allow much larger upward stretch
+    const strength = brushMode === 'raise' ? -24.0 : 12.0;
+    const amount = deltaY * strength;
 
     // Raycast to get interaction point (for radial falloff center)
     getPointer(e);
@@ -47,12 +56,14 @@ export function setupInput(renderer, camera, scene, cloth, mesh) {
       center = new THREE.Vector3(p.x, p.y, p.z);
     }
 
+    lastCenter = center.clone();
     applyRadialDisplacement(center, amount);
   }
 
   function onUp() {
     dragging = false;
     activeIndex = -1;
+    if (lastCenter) stabilizeRegion(lastCenter, brushSize * 1.2);
   }
 
   // Find nearest particle index to a world point
@@ -75,24 +86,42 @@ export function setupInput(renderer, camera, scene, cloth, mesh) {
 
   // Apply a displacement to particles within radius with smooth falloff
   function applyRadialDisplacement(center, amount) {
-    const r2 = radius * radius;
+    const r2 = brushSize * brushSize;
     for (let i = 0; i < cloth.particles.length; i++) {
       const p = cloth.particles[i];
+      if (p.pinned) continue;  // Don't move pinned border vertices
+      
       const dx = p.position.x - center.x;
       const dy = p.position.y - center.y;
       const dz = p.position.z - center.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 > r2) continue;
+      
       const d = Math.sqrt(d2);
-      const falloff = 1 - (d / radius);
-      const soft = falloff * falloff; // smooth quadratic falloff
+      const normalized = d / brushSize;
+      // Cubic falloff for smooth interaction gradient
+      const falloff = 1 - (normalized * normalized * normalized);
+      
+      // Apply displacement to Y (height) with strong falloff
+      p.position.y += amount * falloff;
+      // Add only a small previous-position adjustment to reduce long-term pulsing
+      p.prevPosition.y += amount * falloff * 0.1;
+    }
+  }
 
-      // Move particle along world Y by scaled amount
-      if (!p.pinned) {
-        p.position.y += amount * soft;
-        // also move previous position a bit to produce velocity
-        p.prevPosition.y += amount * soft * 0.6;
-      }
+  function stabilizeRegion(center, radius) {
+    const r2 = radius * radius;
+    for (let i = 0; i < cloth.particles.length; i++) {
+      const p = cloth.particles[i];
+      if (p.pinned) continue;
+      const dx = p.position.x - center.x;
+      const dy = p.position.y - center.y;
+      const dz = p.position.z - center.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > r2) continue;
+      p.prevPosition.x = p.position.x;
+      p.prevPosition.y = p.position.y;
+      p.prevPosition.z = p.position.z;
     }
   }
 
@@ -100,6 +129,14 @@ export function setupInput(renderer, camera, scene, cloth, mesh) {
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
   window.addEventListener('pointercancel', onUp);
+
+  // Keyboard controls for brush mode and size
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'r' || e.key === 'R') brushMode = 'raise';   // R for raise
+    if (e.key === 'l' || e.key === 'L') brushMode = 'lower';   // L for lower
+    if (e.key === '[') brushSize = Math.max(0.1, brushSize - 0.1);  // [ to shrink
+    if (e.key === ']') brushSize = Math.min(2.0, brushSize + 0.1);  // ] to grow
+  });
 
   return {
     dispose() {

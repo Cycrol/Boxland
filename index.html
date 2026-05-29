@@ -3,13 +3,53 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Boxland — Floating Cloth</title>
+  <title>Boxland — 3D Surf Math Ocean</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app"></div>
+  <div class="ui-panel">
+    <div class="ui-header">
+      <div>
+        <div class="ui-title">Boxland Surf Lab</div>
+        <div class="ui-subtitle">Ride y = f(x, z, t)</div>
+      </div>
+      <div class="ui-header-actions">
+        <button id="toggle-view" class="ui-button">First Person</button>
+        <button id="toggle-animation" class="ui-button">Pause</button>
+      </div>
+    </div>
 
-  <!-- Main module (imports three.js modules) -->
-  <script type="module" src="main.js"></script>
+    <label class="ui-label">Equation</label>
+    <input id="equation-input" class="ui-input" type="text" value="sin(sqrt(x*x + z*z) - t)" spellcheck="false" />
+
+    <div class="ui-row">
+      <label>
+        Wave Speed
+        <input id="speed-range" class="ui-slider" type="range" min="0" max="3" step="0.05" value="1" />
+      </label>
+      <label>
+        Wavelength
+        <input id="wavelength-range" class="ui-slider" type="range" min="0.02" max="0.8" step="0.01" value="0.18" />
+      </label>
+    </div>
+
+    <div class="ui-row">
+      <label>
+        Amplitude
+        <input id="amplitude-range" class="ui-slider" type="range" min="0" max="3" step="0.05" value="1" />
+      </label>
+      <label>
+        Turbulence
+        <input id="turbulence-range" class="ui-slider" type="range" min="0" max="2" step="0.05" value="0.45" />
+      </label>
+    </div>
+
+    <div class="preset-grid" id="preset-buttons"></div>
+
+    <div class="ui-note">Use A/D to carve across the living wave surface. Scroll to zoom the first-person view out. Allowed functions: sin, cos, tan, sqrt, abs, pow, exp, log, pi</div>
+  </div>
+
+    <script type="module" src="main.js"></script>
 </body>
 </html>
